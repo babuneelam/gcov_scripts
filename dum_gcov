@@ -1,0 +1,63 @@
+#!/bin/bash
+
+if [ -z "$1" ]
+  then
+    echo " "
+    echo "Usage: dump_gcov <proc_name1> <proc_name2> <proc_name3> ..."
+    echo " "
+    exit
+fi
+
+if [ -p "/tmp" ]; then
+    echo " "
+    echo "/tmp path is missing. dump_gcov stores temporary data in /tmp. you might want to add it."
+    echo " "
+    exit
+fi
+
+echo "set pagination off" > ~/.gdbinit
+
+for procname in "$@"
+do
+
+    	echo " "
+	echo "Application: $procname "
+	pid=`pidof $procname`
+	if [ -z "$pid" ]
+  	then
+    		#echo " "
+    		echo "	pid not found for process: $procname"
+    		echo " "
+    		continue
+	fi
+
+	gcov_tmp_file_name=/root/tmp_$pid
+	gcov_err_file_name=/root/tmperr_$pid
+	gcov_log_file_name=/root/tmperr_$pid
+
+	echo "call __gcov_flush()" > $gcov_tmp_file_name
+	echo "thread apply all call __gcov_flush()" >> $gcov_tmp_file_name
+
+	echo "	Dumping gcov data..."
+	gdb -p $pid -batch -x $gcov_tmp_file_name --args $procname 2>$gcov_err_file_name 1>$gcov_log_file_name
+
+	if grep -q "Error in sourced command file" $gcov_err_file_name; then
+		echo "	Unable to dump gcov data: gdb error - recompile $procname with gcov flags"
+		echo " "
+	else 
+		echo "	Gcov data dump complete."
+		echo " "
+	fi
+
+	rm $gcov_tmp_file_name
+
+        if [ -f $gcov_err_file_name ]; then
+		rm $gcov_err_file_name
+	fi
+
+        if [ -f $gcov_log_file_name ]; then
+		rm $gcov_log_file_name
+	fi
+done
+
+rm ~/.gdbinit
