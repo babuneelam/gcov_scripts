@@ -1,0 +1,176 @@
+#!/bin/bash 
+
+# checks args & echo usage 
+
+script_name=`basename $0`
+if [ -z "$1" ]
+then
+    echo " "
+    echo "Usage: $script_name --[local/remote] --kinfo --uinfo "
+    echo "                    [--kp <kdir_prefix>] [--up <udir_prefix>]"
+    echo " "
+    echo "Execute this script from any build sub-directory to update" 
+    echo "corresponding run time coverage info"
+    echo " "
+    exit
+fi
+
+build_dir=`pwd`
+
+echo " "
+read -r -p "Is $build_dir the build sub-directory you want to update run time coverage info with? : (y/n)?" confirmation
+if [[ ! $confirmation =~ ^([yY])$ ]]
+then
+    echo "	Execute this script from any build sub-directory to update" 
+    echo "	corresponding run time coverage info"
+    echo " "
+    exit
+fi
+    echo " "
+
+#Take the following from script input.. if not given, assign a default..
+LOCAL=0
+REMOTE=0
+KINFO=0
+UINFO=0
+GCOV_KDIR_PREFIX=/sys/kernel/debug/gcov/
+GCOV_KDIR_MOUNT=/sys/kernel/debug/
+GCOV_UDIR_PREFIX=/
+
+#eval set -- "$PARSED_OPTIONS"
+#while true;
+#do
+#  case "$1" in
+
+kp=0
+up=0
+for i in "$@"
+do
+case $i in
+    --local)
+    LOCAL=1 ;;
+    --remote)
+    REMOTE=1 ;;
+    --kinfo)
+    KINFO=1 ;;
+    --uinfo)
+    UINFO=1 ;;
+    --kp)
+    kp=1;;
+    --up)
+    up=1;;
+    *)
+    if [[ ( "$kp" == 1 ) ]] ; then
+        GCOV_KDIR_PREFIX="${i#*=}"; kp=0
+    else
+        if [[ ( "$up" == 1 ) ]] ; then
+            GCOV_UDIR_PREFIX="${i#*=}"; up=0
+        else
+            echo "Unknown option: ${i#*=}"
+            exit
+        fi
+    fi
+    ;;
+esac
+done
+
+#Validation
+#if local and remote, exit. if neither local nor remote, exit
+if [ $LOCAL -ne 1 ] && [ $REMOTE -ne 1 ]; then
+    echo "$script_name requires either --local or --remote"
+    exit
+fi
+
+if [ $LOCAL -ne 0 ] && [ $REMOTE -ne 0 ]; then
+    echo "$script_name expects only either --local or --remote"
+    exit
+fi
+
+#if neither kinfo or uinfo, exit
+if [ $KINFO -ne 1 ] && [ $UINFO -ne 1 ]; then
+    echo "$script_name requires either --kinfo or --uinfo"
+    exit
+fi
+
+#validate kp & up paths?
+
+echo "Deleting old run time runtime info in build directory: $build_dir"
+find $build_dir -type f -name '*.gcda' -exec echo "$(tput setaf 1)	{} $(tput sgr0)" \;
+find $build_dir -type f -name '*.gcda' -exec rm {} \;
+echo " "
+
+if [[ ( "$KINFO" == 1 ) ]] ; then
+	echo "Importing new kspace coverage run time info from test device...."
+	echo "	Treating $GCOV_KDIR_PREFIX as top level kspace gcov directory in test machine"
+	GCOV_TEST_KDIR=$GCOV_KDIR_PREFIX/$build_dir
+	rm -rf $build_dir/gcov_kinfo/ 
+
+	if [[ ( "$LOCAL" == 1 ) ]] ; then
+    		#mkdir $build_dir/gcov_kinfo
+		mount -t debugfs none $GCOV_KDIR_MOUNT
+    		cp -R $GCOV_TEST_KDIR/ $build_dir/gcov_kinfo/
+    		#find $build_dir -type f -name '*.gcda' -exec echo "	{}" \;
+	else
+		read -r -p "Enter IP address of Test Machine: " ip
+		read -r -p "Enter scp username of Test Machine: " user
+		#ssh user@ip "mount -t debugfs none $GCOV_KDIR_MOUNT"
+		scp -r $user@$ip:$GCOV_TEST_KDIR/* $build_dir/gcov_kinfo/
+
+		rc=$?
+		if [[ $rc != 0 ]] ; then
+			echo scp error
+			exit $rc
+		fi
+    		#find $build_dir -type f -name '*.gcda' -exec echo "	{}" \;
+	fi
+
+	find $build_dir/gcov_kinfo/ -type l -name '*.gcno' -exec rm {} \;
+
+	echo "	Merging new kspace coverage run time info to the build directory...."
+	#rsync -av $build_dir/gcov_kinfo/ $build_dir
+    	cp -R $build_dir/gcov_kinfo/* $build_dir/
+	rm -rf $build_dir/gcov_kinfo/ 
+    	find $build_dir -type f -name '*.gcda' -exec echo "$(tput setaf 2)	{} $(tput sgr0)" \;
+fi
+
+#rsync -av $build_dir/gcov_uinfo/ $build_dir
+#rm -rf $build_dir/gcov_kinfo/ 
+#rsync -av a1/ a
+#cp -R a1/* a/
+
+if [[ ( "$UINFO" == 1 ) ]] ; then
+	echo "Importing new uspace coverage run time info from test device...."
+	echo "	Treating $GCOV_UDIR_PREFIX as top level uspace gcov directory in test machine"
+	GCOV_TEST_UDIR=$GCOV_UDIR_PREFIX/$build_dir
+	rm -rf $build_dir/gcov_uinfo/ 
+
+	if [[ ( "$LOCAL" == 1 ) ]] ; then
+    		#mkdir $build_dir/gcov_uinfo
+    		cp -R $GCOV_TEST_UDIR/ $build_dir/gcov_uinfo/
+    		#find $build_dir -type f -name '*.gcda' -exec echo "	{}" \;
+	else
+                if [ -z "$ip" ] ; then
+		    read -r -p "Enter IP address of Test Machine: " ip
+                fi
+                if [ -z "$user" ] ; then
+		    read -r -p "Enter scp username of Test Machine: " user
+                fi
+		scp -r $user@$ip:$GCOV_TEST_UDIR/* $build_dir/gcov_uinfo/
+
+		rc=$?
+		if [[ $rc != 0 ]] ; then
+			echo scp error
+			exit $rc
+		fi
+    		#find $build_dir -type f -name '*.gcda' -exec echo "	{}" \;
+	fi
+
+	find $build_dir/gcov_uinfo/ -type l -name '*.gcno' -exec rm {} \;
+
+	echo "	Merging new uspace coverage run time info to the build directory...."
+	#rsync -av $build_dir/gcov_uinfo/ $build_dir
+    	cp -R $build_dir/gcov_uinfo/* $build_dir/
+	rm -rf $build_dir/gcov_uinfo/ 
+    	find $build_dir -type f -name '*.gcda' -exec echo "$(tput setaf 2)	{} $(tput sgr0)" \;
+fi
+
