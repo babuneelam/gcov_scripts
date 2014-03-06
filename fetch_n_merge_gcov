@@ -113,7 +113,7 @@ if [[ ( "$KINFO" == 1 ) ]] ; then
 	else
 		read -r -p "Enter IP address of Test Machine: " ip
 		read -r -p "Enter scp username of Test Machine: " user
-		#ssh user@ip "mount -t debugfs none $GCOV_KDIR_MOUNT"
+		ssh $user@$ip "mount -t debugfs none $GCOV_KDIR_MOUNT"
 		scp -r $user@$ip:$GCOV_TEST_KDIR/* $build_dir/gcov_kinfo/
 
 		rc=$?
